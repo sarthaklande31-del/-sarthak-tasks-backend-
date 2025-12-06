@@ -9,48 +9,50 @@ CORS(app)
 
 DATA_FILE = 'database.json'
 
-# --- HELPER FUNCTIONS ---
 def load_db():
     if not os.path.exists(DATA_FILE):
         return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
     try:
         with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except:
+            data = json.load(f)
+            
+            # === SELF-HEALING LOGIC ===
+            # If we detect the old "List" format, we wipe it and start fresh.
+            if isinstance(data, list):
+                print("Old database format detected. Upgrading to Sarthak 2.0...")
+                return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
+            
+            return data
+    except Exception as e:
+        print(f"Database Error: {e}")
         return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
 
 def save_db(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-# --- DAILY AUTO-RESET LOGIC ---
-def check_daily_reset(data):
-    today = datetime.now().strftime("%Y-%m-%d")
-    if data.get("last_reset") != today:
-        # It's a new day! Reset all 'done' tasks to False (or archive them)
-        # For this logic, we will simply uncheck them so you can do them again.
-        for task in data["tasks"]:
-            task["done"] = False
-        data["last_reset"] = today
-        save_db(data)
-    return data
-
-# --- ROUTES ---
-
 @app.route('/')
 def home():
-    return "Sarthak 2.0 Nexus Online."
+    return "Sarthak 2.0 Backend: ONLINE"
 
 @app.route('/tasks', methods=['GET'])
 def get_tasks():
     data = load_db()
-    data = check_daily_reset(data) # Check for new day
+    
+    # Check for Daily Reset
+    today = datetime.now().strftime("%Y-%m-%d")
+    if data.get("last_reset") != today:
+        for task in data["tasks"]:
+            task["done"] = False
+        data["last_reset"] = today
+        save_db(data)
+        
     return jsonify(data["tasks"])
 
 @app.route('/add', methods=['POST'])
 def add_task():
     data = load_db()
-    req = request.json
+    req = request.json or {}
     
     new_task = {
         "text": req.get("task", "Untitled"),
@@ -68,22 +70,20 @@ def add_task():
 def toggle_task(index):
     data = load_db()
     tasks = data["tasks"]
-    
     if 0 <= index < len(tasks):
         tasks[index]["done"] = not tasks[index]["done"]
         save_db(data)
-        return jsonify({"message": "Toggled", "state": tasks[index]["done"]})
+        return jsonify({"success": True})
     return jsonify({"error": "Invalid index"}), 400
 
 @app.route('/delete/<int:index>', methods=['DELETE'])
 def delete_task(index):
     data = load_db()
     tasks = data["tasks"]
-    
     if 0 <= index < len(tasks):
-        deleted = tasks.pop(index)
+        tasks.pop(index)
         save_db(data)
-        return jsonify({"message": "Deleted", "task": deleted})
+        return jsonify({"success": True})
     return jsonify({"error": "Invalid index"}), 400
 
 if __name__ == '__main__':
