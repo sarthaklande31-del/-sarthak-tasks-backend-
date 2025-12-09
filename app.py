@@ -1,3 +1,31 @@
+# --- ADD THESE IMPORTS AT THE TOP ---
+from PIL import Image
+import io
+import base64
+
+# --- ADD THIS NEW ROUTE ---
+@app.route('/api/analyze_image', methods=['POST'])
+def analyze_image():
+    try:
+        data = request.json
+        image_data = data['image'] # Base64 string
+        
+        # Clean the base64 string
+        if "base64," in image_data:
+            image_data = image_data.split("base64,")[1]
+            
+        # Convert to Image object
+        img = Image.open(io.BytesIO(base64.b64decode(image_data)))
+        
+        # Ask Gemini Vision
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(["Extract all text from this image and summarize it briefly.", img])
+        
+        return jsonify({"status": "success", "text": response.text})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
 import os
 import json
 import datetime
@@ -8,7 +36,7 @@ app = Flask(__name__)
 DB_FILE = 'notes.json'
 
 # ⚠️ PASTE YOUR KEY HERE
-GENAI_API_KEY = "PASTE_YOUR_GEMINI_KEY_HERE"
+GENAI_API_KEY = "AIzaSyCJVsR1KiobHNbGwN5BalhQnjWjoODctIc"
 genai.configure(api_key=GENAI_API_KEY)
 
 # --- DATABASE LOGIC ---
