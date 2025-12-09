@@ -3,15 +3,15 @@ import json
 import datetime
 import io
 import base64
-from PIL import Image  # This requires 'pip install Pillow'
+from PIL import Image  # Requires 'pip install Pillow'
 from flask import Flask, render_template, request, jsonify
 import google.generativeai as genai
 
 app = Flask(__name__)
 DB_FILE = 'notes.json'
 
-# ⚠️ YOUR API KEY (I put it back here for you)
-GENAI_API_KEY = "AIzaSyCJVsR1KiobHNbGwN5BalhQnjWjoODctIc"
+# ⚠️ PASTE YOUR KEY HERE
+GENAI_API_KEY =  "AIzaSyAKiC5G07jy01I_WBLsPyR7R2iGlKz52mc"
 genai.configure(api_key=GENAI_API_KEY)
 
 # --- DATABASE LOGIC ---
@@ -32,8 +32,7 @@ def save_db(data):
 def get_ai_category(text):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        # Force strict categorization
-        prompt = f"Categorize this text into ONE word (Todo, Shopping, Idea, Work). If unsure, say 'Idea': '{text}'"
+        prompt = f"Categorize this text into ONE word (Todo, Shopping, Idea, Work): '{text}'"
         response = model.generate_content(prompt)
         return response.text.strip()
     except:
@@ -41,45 +40,30 @@ def get_ai_category(text):
 
 # --- ROUTES ---
 @app.route('/')
-def index():
-    return render_template('index.html')
+def index(): return render_template('index.html')
 
 @app.route('/api/notes', methods=['GET'])
 def get_notes():
     return jsonify(load_db())
 
-# --- NEW IMAGE ROUTE (Correctly Placed) ---
 @app.route('/api/analyze_image', methods=['POST'])
 def analyze_image():
     try:
         data = request.json
-        image_data = data.get('image')
-        
-        if not image_data:
-            return jsonify({"status": "error", "message": "No image data"})
-
-        # Clean base64 string
+        image_data = data.get('image', '')
         if "base64," in image_data:
             image_data = image_data.split("base64,")[1]
-            
-        # Convert to Image object
         img = Image.open(io.BytesIO(base64.b64decode(image_data)))
-        
-        # Ask Gemini Vision
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(["Extract all text from this image. Keep it short.", img])
-        
+        response = model.generate_content(["Extract text and summarize this image briefly.", img])
         return jsonify({"status": "success", "text": response.text})
     except Exception as e:
-        print(f"Image Error: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/api/add', methods=['POST'])
 def add_note():
     data = request.json
     db = load_db()
-    
-    # AI Magic
     category = get_ai_category(data['text'])
     
     new_note = {
@@ -87,14 +71,16 @@ def add_note():
         "title": data.get('title', ''),
         "text": data['text'],
         "color": data.get('color', '#202124'),
+        "due_date": data.get('due_date', ''),
         "category": category,
         "is_pinned": False,
+        "is_archived": False,
+        "is_trashed": False,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
-    
     db['notes'].insert(0, new_note)
     save_db(db)
-    return jsonify({"status": "success", "note": new_note})
+    return jsonify({"status": "success"})
 
 @app.route('/api/update', methods=['POST'])
 def update_note():
@@ -111,6 +97,7 @@ def update_note():
 def delete_note():
     data = request.json
     db = load_db()
+    # Permanent delete
     db['notes'] = [n for n in db['notes'] if n['id'] != data['id']]
     save_db(db)
     return jsonify({"status": "success"})
