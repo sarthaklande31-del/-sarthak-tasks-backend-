@@ -1,91 +1,88 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import os
 import json
-from datetime import datetime
+import datetime
+from flask import Flask, render_template, request, jsonify
+import google.generativeai as genai
 
 app = Flask(__name__)
-CORS(app)
+DB_FILE = 'notes.json'
 
-DATA_FILE = 'database.json'
+# ⚠️ PASTE YOUR KEY HERE
+GENAI_API_KEY = "PASTE_YOUR_GEMINI_KEY_HERE"
+genai.configure(api_key=GENAI_API_KEY)
 
+# --- DATABASE LOGIC ---
 def load_db():
-    if not os.path.exists(DATA_FILE):
-        return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
+    if not os.path.exists(DB_FILE):
+        return {"notes": []} # Simplified structure for the "Ultimate" version
     try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-            
-            # === SELF-HEALING LOGIC ===
-            # If we detect the old "List" format, we wipe it and start fresh.
-            if isinstance(data, list):
-                print("Old database format detected. Upgrading to Sarthak 2.0...")
-                return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
-            
-            return data
-    except Exception as e:
-        print(f"Database Error: {e}")
-        return {"tasks": [], "last_reset": datetime.now().strftime("%Y-%m-%d")}
+        with open(DB_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {"notes": []}
 
 def save_db(data):
-    with open(DATA_FILE, 'w') as f:
+    with open(DB_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+# --- AI LOGIC ---
+def get_ai_category(text):
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"Categorize this text into ONE word (Todo, Shopping, Idea, Work): '{text}'"
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except:
+        return "Unsorted"
+
+# --- ROUTES ---
 @app.route('/')
-def home():
-    return "Sarthak 2.0 Backend: ONLINE"
+def index(): return render_template('index.html')
 
-@app.route('/tasks', methods=['GET'])
-def get_tasks():
-    data = load_db()
-    
-    # Check for Daily Reset
-    today = datetime.now().strftime("%Y-%m-%d")
-    if data.get("last_reset") != today:
-        for task in data["tasks"]:
-            task["done"] = False
-        data["last_reset"] = today
-        save_db(data)
-        
-    return jsonify(data["tasks"])
+@app.route('/api/notes', methods=['GET'])
+def get_notes():
+    return jsonify(load_db())
 
-@app.route('/add', methods=['POST'])
-def add_task():
-    data = load_db()
-    req = request.json or {}
+@app.route('/api/add', methods=['POST'])
+def add_note():
+    data = request.json
+    db = load_db()
     
-    new_task = {
-        "text": req.get("task", "Untitled"),
-        "category": req.get("category", "General"),
-        "priority": req.get("priority", "Normal"),
-        "done": False,
-        "timestamp": datetime.now().strftime("%H:%M")
+    # AI Magic
+    category = get_ai_category(data['text'])
+    
+    new_note = {
+        "id": str(datetime.datetime.now().timestamp()),
+        "title": data.get('title', ''),
+        "text": data['text'],
+        "color": data.get('color', '#202124'), # Default Grey
+        "category": category,
+        "is_pinned": False,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     
-    data["tasks"].append(new_task)
-    save_db(data)
-    return jsonify({"message": "Task created", "task": new_task})
+    db['notes'].insert(0, new_note)
+    save_db(db)
+    return jsonify({"status": "success", "note": new_note})
 
-@app.route('/toggle/<int:index>', methods=['POST'])
-def toggle_task(index):
-    data = load_db()
-    tasks = data["tasks"]
-    if 0 <= index < len(tasks):
-        tasks[index]["done"] = not tasks[index]["done"]
-        save_db(data)
-        return jsonify({"success": True})
-    return jsonify({"error": "Invalid index"}), 400
+@app.route('/api/update', methods=['POST'])
+def update_note():
+    data = request.json
+    db = load_db()
+    for note in db['notes']:
+        if note['id'] == data['id']:
+            note.update(data) # Update text, color, title
+            break
+    save_db(db)
+    return jsonify({"status": "success"})
 
-@app.route('/delete/<int:index>', methods=['DELETE'])
-def delete_task(index):
-    data = load_db()
-    tasks = data["tasks"]
-    if 0 <= index < len(tasks):
-        tasks.pop(index)
-        save_db(data)
-        return jsonify({"success": True})
-    return jsonify({"error": "Invalid index"}), 400
+@app.route('/api/delete', methods=['POST'])
+def delete_note():
+    data = request.json
+    db = load_db()
+    db['notes'] = [n for n in db['notes'] if n['id'] != data['id']]
+    save_db(db)
+    return jsonify({"status": "success"})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000, debug=True)
